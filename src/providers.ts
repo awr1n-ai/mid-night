@@ -6,7 +6,7 @@ import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-pri
 import { type MidnightWalletProvider } from './wallet.js';
 import { type NetworkConfig } from './config.js';
 
-export type HelloWorldCircuits = 'storeMessage';
+export type HelloWorldCircuits = 'commitMessage' | 'revealMessage';
 
 export type HelloWorldProviders = MidnightProviders<any>;
 
