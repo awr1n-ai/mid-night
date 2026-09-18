@@ -25,6 +25,11 @@ import {
   Contract,
   ledger,
   zkConfigPath,
+  Phase,
+  emptyPrivateState,
+  withPendingMessage,
+  withRevealedMessage,
+  decodeMessage,
 } from '../../contracts/index.js';
 
 // Required for GraphQL subscriptions in Node.js
@@ -148,7 +153,7 @@ describe(`Hello World Contract (${network})`, () => {
       await (deployContract<Contract>)(providers, {
         compiledContract: CompiledHelloWorldContract,
         privateStateId: PRIVATE_STATE_ID,
-        initialPrivateState: {},
+        initialPrivateState: emptyPrivateState,
       });
 
     logger.info(`Setting the contract address...`);
@@ -158,21 +163,51 @@ describe(`Hello World Contract (${network})`, () => {
     expect(contractAddress.length).toBeGreaterThan(0);
 
     const state = await queryLedger(providers);
-    expect(state.message).toEqual('');
+    expect(state.phase).toEqual(Phase.Empty);
   });
 
-  it('Stores Hello World!', async () => {
+  it('Commits a message without revealing it', async () => {
     const message = 'Hello World!';
+    const current =
+      (await providers.privateStateProvider.get(PRIVATE_STATE_ID)) ??
+      emptyPrivateState;
+    await providers.privateStateProvider.set(
+      PRIVATE_STATE_ID,
+      withPendingMessage(current, message),
+    );
 
-    await (submitCallTx<Contract, 'storeMessage'>)(providers, {
+    await (submitCallTx<Contract, 'commitMessage'>)(providers, {
       compiledContract: CompiledHelloWorldContract,
       contractAddress,
       privateStateId: PRIVATE_STATE_ID,
-      circuitId: 'storeMessage',
-      args: [message],
+      circuitId: 'commitMessage',
     });
 
     const state = await queryLedger(providers);
-    expect(state.message).toEqual(message);
+    expect(state.phase).toEqual(Phase.Committed);
+    // The commitment is a non-trivial hash; the message itself never appears
+    // anywhere in the public ledger state at this point.
+    expect(Array.from(state.commitment).some((byte) => byte !== 0)).toBe(true);
+  });
+
+  it('Reveals the message and proves it matches the commitment', async () => {
+    await (submitCallTx<Contract, 'revealMessage'>)(providers, {
+      compiledContract: CompiledHelloWorldContract,
+      contractAddress,
+      privateStateId: PRIVATE_STATE_ID,
+      circuitId: 'revealMessage',
+    });
+
+    const state = await queryLedger(providers);
+    expect(state.phase).toEqual(Phase.Revealed);
+    expect(decodeMessage(state.revealedMessage)).toEqual('Hello World!');
+
+    const current =
+      (await providers.privateStateProvider.get(PRIVATE_STATE_ID)) ??
+      emptyPrivateState;
+    await providers.privateStateProvider.set(
+      PRIVATE_STATE_ID,
+      withRevealedMessage(current),
+    );
   });
 });
