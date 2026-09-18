@@ -6,6 +6,11 @@
   "engines": {
     "node": ">=22.0.0"
   },
+  "workspaces": [
+    "contracts",
+    "api",
+    "ui"
+  ],
   "scripts": {
     "compile": "compact compile contracts/hello-world.compact contracts/managed/hello-world",
     "test": "NODE_OPTIONS='--experimental-vm-modules' vitest run",
@@ -17,7 +22,9 @@
     "proof:up": "docker compose up -d --wait proof-server",
     "proof:down": "docker compose stop proof-server",
     "wait:dust": "vite-node scripts/wait-for-dust.ts",
-    "validate": "yarn env:up && yarn test:local; yarn env:down"
+    "validate": "yarn env:up && yarn test:local; yarn env:down",
+    "ui:build": "yarn workspace hello-world-local-api build && yarn workspace hello-world-local-ui build",
+    "ui:dev": "yarn workspace hello-world-local-api build && yarn workspace hello-world-local-ui dev"
   },
   "dependencies": {
     "@midnight-ntwrk/midnight-js-protocol": "4.1.1",
@@ -45,7 +52,8 @@
     "vitest": "^4.1.0"
   },
   "resolutions": {
-    "@midnight-ntwrk/wallet-sdk": "1.2.0"
+    "@midnight-ntwrk/wallet-sdk": "1.2.0",
+    "@swc/core": "1.12.14"
   },
   "packageManager": "yarn@1.22.22"
 }

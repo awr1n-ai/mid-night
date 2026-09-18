@@ -1,6 +1,10 @@
 /node_modules
 /contracts/managed
 /contracts/hello-world.compact
+/ui/public/managed
+/ui/dist
+/api/dist
+*.tsbuildinfo
 /logs
 deployment.json
 /midnight-level-db
