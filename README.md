@@ -13,7 +13,7 @@ git clone git@github.com:midnightntwrk/example-hello-world.git
 Install dependencies:
 
 ```bash
-yarn install
+yarn install  // hi aryan this side 
 ```
 
 ## Create the contract file
