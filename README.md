@@ -1,137 +1,144 @@
-# Hello World Example
+# mid-night — Commit/Reveal Hello World
 
-The repository is intended as part of the tutorial flow for the hello-world example in the [Midnight documentation](https://docs.midnight.network/getting-started/hello-world). It does not operate as a complete repository without the accompanying documentation.
+## The idea
 
-The below documentation will be provided here to "finish" this example.
+Most "hello world" demos on public blockchains store a message directly on-chain,
+which means the message is visible to anyone the instant it's submitted. This
+project starts from a small but real privacy question: *can a user prove they
+committed to a specific message at a specific point in time, without revealing
+that message until they choose to?* That's the shape of a huge number of
+real-world flows — sealed-bid auctions, voting, timestamped disclosures,
+whistleblowing with proof-of-priority — and Midnight's zero-knowledge circuits
+are a natural fit for it. This repo implements the smallest possible version
+of that pattern: a two-step **commit/reveal** contract built on top of the
+Midnight `hello-world` tutorial, plus a small API layer and a React UI so the
+whole flow can be driven from a browser against a local devnet.
 
-## Set up project
+## What's in the repo
 
-```bash
-git clone git@github.com:midnightntwrk/example-hello-world.git
+This is a Yarn workspace with three packages on top of the Compact contract:
+
+```
+contracts/    the Compact smart contract (commit/reveal) + compiled output
+api/          TypeScript package wrapping contract providers for the UI
+ui/           React (Vite) frontend for wallet connection + contract calls
+src/          local devnet test/deploy scripts (vitest)
 ```
 
-Install dependencies:
+## Public state vs. private witness
 
-```bash
-yarn install  // hi aryan this side 
-```
-
-## Create the contract file
-
-Create a new file named `hello-world.compact` in the `contracts` directory:
-
-```bash
-touch contracts/hello-world.compact
-```
-
-Open this file in VS Code:
-```bash
-code .
-```
-
-## Create the Compact Smart Contract
+The contract (`contracts/hello-world.compact`) is deliberately built around
+Midnight's core privacy boundary: **ledger state is public, witnesses are
+private and never leave the caller's machine.**
 
 ```compact
-pragma language_version 0.23;
+export ledger phase: Phase;              // public: Empty | Committed | Revealed
+export ledger commitment: Bytes<32>;     // public: a hash, not the message
+export ledger revealedMessage: Bytes<32>;// public: only set after reveal
+export ledger round: Counter;            // public: how many commits have happened
 
-export ledger message: Opaque<"string">;
-
-export circuit storeMessage(newMessage: Opaque<"string">): [] {
-  message = disclose(newMessage);
-}
+witness secretMessage(): Bytes<32>;      // private: lives only on the caller's machine
+witness secretSalt(): Bytes<32>;         // private: lives only on the caller's machine
 ```
-- `pragma language_version` specifies which version of Compact your contract uses.
-- `ledger message` creates a state variable named `message` that stores a string value in the on-chain state. On-chain state is public and persistent on the blockchain.
-- `circuit storeMessage` is a Compact circuit (function) that defines the logic to modify on-chain state.
-- `newMessage: Opaque<"string">` is the input parameter. *Circuit parameters are always private by default.* The `disclose()` function marks the private value as safe to store publicly. Without it, trying to assign `newMessage` directly to the ledger returns a compiler error.
 
-## Compile the contract
+- **`commitMessage()`** pulls the message and a random salt from the caller's
+  private witnesses and writes only `persistentCommit(message, salt)` — a
+  32-byte hash — to the public `commitment` ledger field. Anyone watching the
+  chain sees that *a* commitment was made and the round counter advance, but
+  the hash reveals nothing about the message's content or even its length.
+- **`revealMessage()`** re-derives the same commitment from the *same*
+  witnesses and asserts it equals the on-chain `commitment` before disclosing
+  the message via `disclose()`. Compact's compiler enforces this at the
+  language level: a witness-derived value can't be assigned to a `ledger`
+  field or returned from a circuit without an explicit `disclose()` call, so
+  it's structurally impossible to leak the message earlier by accident.
+- Because the witnesses never touch the chain until `revealMessage()` is
+  called, a mismatched or fabricated message simply fails the on-chain
+  assertion — the contract enforces the binding cryptographically, not just
+  by convention in the client code.
 
-Compiling transforms your Compact code into zero-knowledge circuits, generates cryptographic keys, 
-and creates TypeScript APIs and a JavaScript implementation for the contract to be used by DApps. 
+See the comments at the top of `contracts/hello-world.compact` for the full
+reasoning.
 
-Run the compiler from the contracts folder:
+## Setup
+
+### Prerequisites
+
+- Node.js >= 22
+- [Yarn](https://yarnpkg.com/) (classic, 1.22.x)
+- [Docker](https://www.docker.com/products/docker-desktop/) (for the local devnet: node + indexer + proof server)
+- The [Compact CLI](https://docs.midnight.network/relnotes/compact-tools) (`compact`), used to compile the contract
+
+### Install
 
 ```bash
-compact compile hello-world.compact managed/hello-world
+git clone https://github.com/awr1n-ai/mid-night.git
+cd mid-night
+yarn install
 ```
 
-You should see the following output:
+### Compile the contract
 
-```
-Compiling 1 circuits:
-  circuit "storeMessage" (k=6, rows=26)
-```
-
-The compilation process will:
-1. Parse and validate your Compact code.
-2. Generate zero-knowledge circuits from your logic.
-3. Create proving and verifying keys for the circuits.
-4. Generate the TypeScript API and JavaScript implementation for the contract.
-
-When compilation completes, you'll see a new directory structure:
-
-```
-contracts/
-├── managed/
-|   └── hello-world/
-|        ├── compiler/
-|        ├── contract/
-|        ├── keys/
-|        └── zkir/
-└── hello-world.compact
-└── index.ts
-```
-
-Here's what each directory contains:
-
-- **contract/**: The compiled contract artifacts, which includes the JavaScript implementation and type definitions.
-- **keys/**: Cryptographic proving and verifying keys that enable zero-knowledge proofs.
-- **zkir/**: Zero-Knowledge Intermediate Representation—the bridge between Compact and the ZK backend.
-- **compiler/**: Compiler-generated JSON output that other tools can use to understand the contract structure.
-
-## Deploy Contract to Local Devnet
-Now that your contract is compiled, it needs to be deployed to the blockchain so that you can interact with it.
-
-Be sure the Docker engine is running and in a *separate terminal* start the proof server from the project root:
 ```bash
-yarn env:up
+yarn compile
+# compact compile contracts/hello-world.compact contracts/managed/hello-world
 ```
 
-Leave the proof server running for the following steps.
+This generates `contracts/managed/hello-world/` containing the ZK circuits,
+proving/verifying keys, and the TypeScript API for the contract:
 
-To deploy the contract, you'll need a wallet. The local devnet package comes with 3 pre-funded wallets.
+![Successful compile — two circuits, commitMessage and revealMessage](docs/screenshots/compile-output.png)
 
+### Run the local devnet and deploy
 
-Run the deployment script:
+Start Docker, then bring up the local node/indexer/proof-server stack and run
+the deploy + commit/reveal test against it:
+
 ```bash
-yarn test:local
+yarn env:up        # docker compose up -d --wait
+yarn test:local    # deploys the contract and runs the commit/reveal flow
+yarn env:down       # docker compose down
 ```
 
-The test script will begin to show output from your local devnet and will progress the contract deployment and interaction programatically:
+`test:local` deploys a fresh copy of the contract to the local devnet using
+one of the pre-funded local wallets. The screenshot below confirms a deploy
+by querying the local indexer directly for the block that contains the
+`ContractDeploy` action and its address (useful in general, and specifically
+because the `wallet-sdk-capabilities` submission watcher in this SDK version
+is flaky against a fast-slot local devnet — the transaction itself lands on
+first submission even on the runs where the client-side confirmation errors
+out):
 
-```
-[12:46:12.694] INFO (22064): Wallet sync complete after 23 emissions
-[12:46:12.703] INFO (22064): Providers initialized. Ready to test
-[12:46:12.707] INFO (22064): Creating private state...
-[12:46:32.347] INFO (22064): Setting the contract address...
-[12:46:32.347] INFO (22064): Contract deployed at: bba6579743ae23b44301d4a9f8df30dbd5244d63a59d8fbc2c9fc7ea521a04f8
- ✓ src/test/hw.test.ts (2 tests) 39112ms
-   ✓ Hello World Contract > Deploys the contract  19649ms
-   ✓ Hello World Contract > Stores Hello World!   18184ms
-```
+![Local indexer confirming a ContractDeploy action and its address](docs/screenshots/deploy-output.png)
 
-Stop the Docker container:
+### Run the UI against the local devnet
+
 ```bash
-yarn env:down
+yarn ui:dev
 ```
 
-Hello World! You are now ready to explore [Tutorials](https://docs.midnight.network/category/tutorials) for more detailed instructions on building DApps on Midnight!
+This builds the `api` package and starts the Vite dev server for `ui`, which
+connects to a Midnight-compatible wallet extension and the contract deployed
+above.
 
-## Deploy Contract to Live Testnet
+### Run against Preview / Preprod
 
-To run this test script on Preview or Preprod:
-1. Generate a wallet on the given network and fund it manually via the network's faucet page — [Preview](https://midnight-tmnight-preview.nethermind.dev/) or [Preprod](https://midnight-tmnight-preprod.nethermind.dev/). The faucet is a human-facing web page (no programmatic drip endpoint), so the test suite assumes the seed you supply is already funded with tNIGHT. tDUST can be delegated in 1AM or Lace Carbon (coming soon). See [Environments and endpoints](https://docs.midnight.network/relnotes/network) for reference.
-1. Create `.env.<network>` and populate it based on the information in `.env.<network>.example` in this repository.
-1. Start the proof server: `yarn proof:up`
-1. Start the test: `yarn test:<network>` -- the wallet will sync to the network and advance the test suite programmatically.
+1. Fund a wallet on the target network via the network's faucet page —
+   [Preview](https://midnight-tmnight-preview.nethermind.dev/) or
+   [Preprod](https://midnight-tmnight-preprod.nethermind.dev/).
+2. Create `.env.<network>` based on `.env.<network>.example`.
+3. `yarn proof:up`
+4. `yarn test:<network>`
+
+## Contract flow
+
+```
+constructor()        → phase = Empty
+commitMessage()       → phase = Empty  → Committed   (writes commitment hash only)
+revealMessage()       → phase = Committed → Revealed (discloses the message, only if it matches)
+```
+
+Calling `commitMessage()` again while `phase == Committed` fails; calling
+`revealMessage()` before a commitment exists, or with a message that doesn't
+match the stored commitment, also fails — both are enforced on-chain by
+`assert`.
