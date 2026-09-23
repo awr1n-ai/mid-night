@@ -1,0 +1,88 @@
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+// ---------------------------------------------------------------------------
+// Hello World — commit/reveal
+//
+// The privacy claim this contract makes, and how to observe it:
+//
+//   1. commitMessage() takes no public arguments. It pulls a secret message
+//      (up to 32 bytes, UTF-8) and a random salt from the caller's private
+//      witnesses and writes only `persistentCommit(message, salt)` — a
+//      32-byte hash — to `commitment`. Anyone watching the chain sees
+//      `commitment` change and `round` increment, proving *that* a message
+//      was committed, but the hash is indistinguishable from random: it
+//      discloses nothing about the message's content or length.
+//
+//   2. revealMessage() re-derives the same commitment from the *same*
+//      witnesses and asserts it equals the on-chain `commitment` before
+//      disclosing the message. This is the provable part: the assert can
+//      only pass if the revealed message is the exact one behind the
+//      earlier commitment — a mismatched or fabricated message makes the
+//      transaction fail, on-chain, without ever exposing what the real
+//      message was.
+//
+// Unlike Opaque<"string"> (which circuits can only pass through, never hash
+// or commit), a fixed-size Bytes<32> value can be fed into persistentCommit
+// directly, so the commit/reveal binding above is an actual in-circuit
+// guarantee rather than something the off-chain code merely asserts.
+// ---------------------------------------------------------------------------
+
+export enum Phase {
+  Empty,
+  Committed,
+  Revealed
+}
+
+export ledger phase: Phase;
+
+export ledger commitment: Bytes<32>;
+
+export ledger revealedMessage: Bytes<32>;
+
+export ledger round: Counter;
+
+// --- Private witnesses -------------------------------------------------
+// Both live only on the caller's machine; neither is ever disclosed.
+witness secretMessage(): Bytes<32>;
+
+witness secretSalt(): Bytes<32>;
+
+constructor() {
+  phase = Phase.Empty;
+}
+
+// Commits to a new secret message. Only the commitment hash reaches the
+// chain — the message and salt never leave the prover.
+export circuit commitMessage(): [] {
+  assert(phase != Phase.Committed, "A commitment is already pending reveal");
+
+  const message = secretMessage();
+  const salt = secretSalt();
+
+  // persistentCommit clears witness taint on its output: the resulting hash
+  // is safe to write directly to the ledger, no disclose() needed.
+  commitment = persistentCommit<Bytes<32>>(message, salt);
+  phase = Phase.Committed;
+  round.increment(1);
+}
+
+// Reveals the committed message and proves it matches the earlier
+// commitment, without the message ever having touched the chain before now.
+export circuit revealMessage(): Bytes<32> {
+  assert(phase == Phase.Committed, "Nothing to reveal");
+
+  const message = secretMessage();
+  const salt = secretSalt();
+  const recomputed = persistentCommit<Bytes<32>>(message, salt);
+
+  // disclose() here reveals only whether the recomputed commitment matches
+  // the stored one (pass/fail), not the message or salt themselves.
+  assert(disclose(recomputed == commitment), "Revealed message does not match the commitment");
+
+  revealedMessage = disclose(message);
+  phase = Phase.Revealed;
+
+  return disclose(message);
+}
