@@ -1,6 +1,6 @@
 # mid-night — Commit/Reveal Hello World
 
-## The idea
+## The idea.
 
 Most "hello world" demos on public blockchains store a message directly on-chain,
 which means the message is visible to anyone the instant it's submitted. This
@@ -48,7 +48,7 @@ witness secretSalt(): Bytes<32>;         // private: lives only on the caller's 
   the hash reveals nothing about the message's content or even its length.
 - **`revealMessage()`** re-derives the same commitment from the *same*
   witnesses and asserts it equals the on-chain `commitment` before disclosing
-  the message via `disclose()`. Compact's compiler enforces this at the
+  the message  via `disclose()`. Compact's compiler enforces this at the
   language level: a witness-derived value can't be assigned to a `ledger`
   field or returned from a circuit without an explicit `disclose()` call, so
   it's structurally impossible to leak the message earlier by accident.
@@ -60,11 +60,11 @@ witness secretSalt(): Bytes<32>;         // private: lives only on the caller's 
 See the comments at the top of `contracts/hello-world.compact` for the full
 reasoning.
 
-## Setup
+## Setup 
+ 
+### Prerequisites 
 
-### Prerequisites
-
-- Node.js >= 22
+- Node.js >= 22 
 - [Yarn](https://yarnpkg.com/) (classic, 1.22.x)
 - [Docker](https://www.docker.com/products/docker-desktop/) (for the local devnet: node + indexer + proof server)
 - The [Compact CLI](https://docs.midnight.network/relnotes/compact-tools) (`compact`), used to compile the contract
